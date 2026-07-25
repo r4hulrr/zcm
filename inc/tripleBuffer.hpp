@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cacheLine.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -7,16 +9,6 @@
 
 namespace zcm
 {
-
-namespace detail
-{
-#ifdef __cpp_lib_hardware_interference_size
-inline constexpr std::size_t cacheLineSize = std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t cacheLineSize = 64;
-#endif
-} // namespace detail
-
 template<typename ValueType>
 class TripleBuffer{
         static_assert(std::is_trivially_copyable_v<ValueType>,

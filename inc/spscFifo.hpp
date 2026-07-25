@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cacheLine.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -9,14 +11,6 @@
 
 namespace zcm
 {
-namespace detail
-{
-#ifdef __cpp_lib_hardware_interference_size
-inline constexpr std::size_t cacheLineSize = std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t cacheLineSize = 64;
-#endif
-} // namespace detail
 template<typename ValueType, std::uint64_t Capacity>
 class SpscFifo{
 	static_assert(std::is_trivially_copyable_v<ValueType>,
@@ -80,4 +74,4 @@ private:
 };
 } // namespace zcm
 
-#include "spsc_fifo.inl"
+#include "spscFifo.inl"

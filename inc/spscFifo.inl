@@ -1,6 +1,6 @@
 #pragma once
 
-#include "spsc_fifo.hpp"
+#include "spscFifo.hpp"
 
 namespace zcm
 {

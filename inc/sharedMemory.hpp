@@ -97,7 +97,44 @@ struct SegmentImage
         SegmentHeader header;
         unsigned char headerPad[kHeaderReserve - sizeof(SegmentHeader)];
         LayoutType payload;
+};
+
+// shared segment - RAII Wrapper around shm_open + ftruncate + mmap
+// knows nothing about c++ objects. Just hands page-aligned bytes
+class SharedSegment
+{
+public:
+	SharedSegment() noexcept = default;
+	// desructor only unmaps memory from process, does not unlink
+	~SharedSegment() noexcept; 
+
+	SharedSegment(const SharedSegment&) = delete;
+	SharedSegment& operator=(const SharedSegment&) = delete;
+	SharedSegment(SharedSegment&& other) noexcept;
+	SharedSegment& operator=(SharedSegment&& other) noexcept;
+
+	// creates shared memory : O_CREAT | O_EXCL
+	// fails with already exists error code if the name is taken
+	[[nodiscard]] SegmentError create(const char* name, 
+					std::size_t bytes,
+					const SegmentOptions& opts) noexcept;
+
+	void detach() noexcept; // calls munmap, does not unlink
+	// does the work of move, its fine to call as we are attaching
+	// a name to the rvalue inside the move before calling this
+	void moveFrom(SharedSegment& other) noexcept; 
+private:
+	// need a fixed size to easily call unlink with the stored name
+	static constexpr std::size_t kMaxName{64}; 
+
+	void* 		_base{nullptr};
+	std::size_t 	_bytes{0};
+	char		_name[kMaxName]{};
+	bool		_creator{false};
+	bool		_locked{false}; // prevent pages to swap disk
+	int		_errno{0}; // stores latest error code
 }
 
-
 } // namespace zcm
+
+#include "sharedMemory.inl"

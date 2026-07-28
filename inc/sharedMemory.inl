@@ -42,6 +42,24 @@ inline void prefaultPages(void* base, std::size_t bytes)
         }
 }
 
+// return current time in ms
+inline std::uint64_t monotonicMillis() noexcept
+{
+        ::timespec ts{};
+        ::clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<std::uint64_t>(ts.tv_sec) * 1000ull 
+        + static_cast<std::uint64_t>(ts.tv_nsec) / 1000000ull;
+}
+
+// sleep for specific time 
+inline void sleepMicros(std::uint32_t us) noexcept
+{
+        ::timespec ts{};
+        ts.tv_sec = static_cast<::time_t>(us / 1000000u);
+        ts.tv_nsec = static_cast<long>((us % 1000000u) * 1000u); // remaning time
+        ::nanosleep(&ts, nullptr);
+}
+
 } // namespace detail
 
 inline const char* toString(SegmentError e) noexcept
@@ -205,6 +223,113 @@ inline SegmentError SharedSegment::create(const char* name,
         // need this as if str is >= size given, strncpy doesnt null term
         _name[kMaxName - 1] = '\0';
         return SegmentError::Ok; 
+}
+
+[[nodiscard]] SegmentError SharedSegment::open(const char* name,
+                                std::size_t expectedBytes,
+                                const SegmentOptions& opts) noexcept{
+
+        // validate the shm name
+        if (!detail::validSegmentName(name)) return SegmentError::BadName;
+        if (::strlen(name) >= kMaxName) return SegmentError::BadName;
+
+        // if already connected to a mapping, detach it first
+        if (valid()) detach();
+
+        const std::size_t wantBytes = detail::roundUpToPage(expectedBytes);
+        // get max time willing to wait until you attach to the shm
+        const std::uint64_t deadline = detail::monotonicMillis() + opts.attachTimeoutMs;
+
+        // try to attach until deadline, if still not attached fail
+        int fd = -1;
+        while(true)
+        {
+                fd = ::shm_open(name, O_RDWR, 0); // No O_CREAT
+                if (fd >= 0) break;
+                _errno = errno;
+
+                if (errno != ENOENT) return SegmentError::OpenFailed;
+                if (detail::monotonicMillis() >= deadline) return SegmentError::NotFound;
+                // sleep for specified time before trying again
+                detail::sleepMicros(opts.attachPollUs);
+        }
+
+        // the creator does shm::open() and fftruncate() as two separate syscalls
+        // between them the object exists but with size 0. If we mapped it now and 
+        // touched byte 0, we would take SIGBUS, so therefore we wait for size to appear
+        // of course within out deadline
+        while(true)
+        {
+                // get the metadata of the open shm object
+                struct ::stat st{};
+                if (::fstat(fd, &st) != 0)
+                {
+                        _errno = errno;
+			::close(fd);
+			return SegmentError::StatFailed;
+                }
+
+		if (static_cast<std::size_t>(st.st_size) >= wantBytes) break;
+		if (detail::monotonicMillis() >= deadline)
+		{
+			::close(fd);
+			return SegmentError::SizeMismatch;
+		}
+		detail::sleepMicros(opts.attachPollUs);
+        }
+
+	// apply flags similar to create() with mmap to control how the process connects
+	// the shm into its own virtual address space
+	int mapFlags = MAP_SHARED;
+
+#ifdef MAP_POPULATE
+        if (opts.prefault) mapFlags |= MAP_POPULATE;
+#endif
+
+        void* base = ::mmap(nullptr, wantBytes, PROT_READ | PROT_WRITE, mapFlags, fd, 0);
+
+        // the mapping holds its own reference to underlying object so fd is not needed anymroe
+        ::close(fd);
+
+        if (base == MAP_FAILED) // this base is not the same as creators most probably its virtual
+        {
+                _errno = errno;
+                ::shm_unlink(name);
+                return SegmentError::MapFailed;
+        }
+
+// if its possible and requested set up huge pages
+#ifdef MADV_HUGEPAGE
+        if (opts.hugePages)
+        {
+                // hint, not for sure, we have to test it ourselves
+                (void)::madvise(base, mapBytes, MADV_HUGEPAGE);
+        }
+#endif
+
+        // explicitly touch each page if requested without relying on OS
+        if (opts.prefault) detail::prefaultPages(base, mapBytes);
+
+        // lock pages if requested so it isnt swapped to disk
+        // enforced not a hint so returns an error code if fails
+        if (opts.lockPages)
+        {
+                if (::mlock(base, wantBytes) != 0)
+                {
+                        _errno = errno;
+                        ::munmap(base, wantBytes);
+                        return SegmentError::LockFailed;
+                }
+                _locked = true;
+        }
+
+        _base = base;
+        _bytes = wantBytes;
+        _creator = false;
+        ::strncpy(_name, name, kMaxName - 1);
+        // need this as if str is >= size given, strncpy doesnt null term
+        _name[kMaxName - 1] = '\0';
+        return SegmentError::Ok;
 }
 
 } // namespace zcm

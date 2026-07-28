@@ -119,6 +119,11 @@ public:
 					std::size_t bytes,
 					const SegmentOptions& opts) noexcept;
 
+	// attacher path : doesnt create memory but connects to created object
+	[[nodiscard]] SegmentError open(const char* name,
+                                std::size_t expectedBytes,
+                                const SegmentOptions& opts) noexcept;
+
 	void detach() noexcept; // calls munmap, does not unlink
 	// does the work of move, its fine to call as we are attaching
 	// a name to the rvalue inside the move before calling this

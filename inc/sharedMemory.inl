@@ -332,4 +332,19 @@ inline SegmentError SharedSegment::create(const char* name,
         return SegmentError::Ok;
 }
 
+inline SegmentError SharedSegment::unlink() noexcept
+{
+        if (_name[0] == '\0') return SegmentError::NotMapped; // empty
+        // removes the name ONLY. Any process that already mapped the object keeps
+        // its mapping and the pages stay alive; the object is destroyed when the
+        // last mapping goes away
+        const int rc = ::shm_unlink(_name);
+        if (rc != 0 && errno != ENOENT)
+        {
+                _errno = errno;
+                return SegmentError::OpenFailed;
+        }
+        return SegmentError::Ok;
+}
+
 } // namespace zcm

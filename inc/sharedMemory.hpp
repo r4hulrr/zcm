@@ -125,11 +125,19 @@ public:
                                 const SegmentOptions& opts) noexcept;
 
 	void detach() noexcept; // calls munmap, does not unlink
+
+	SegmentError unlink() noexcept; // actually unlinks the name from shm
+
 	// does the work of move, its fine to call as we are attaching
 	// a name to the rvalue inside the move before calling this
 	void moveFrom(SharedSegment& other) noexcept; 
 
+	[[nodiscard]] void* base() const noexcept { return _base; }
+	[[nodiscard]] std::size_t bytes() const noexcept { return _bytes; }
+	[[nodiscard]] bool isCreator() const noexcept { return _creator; }
 	[[nodiscard]] bool valid() const noexcept { return _base != nullptr; }
+	[[nodiscard]] int lastErrno() const noexcept { return _errno; }
+	[[nodiscard]] const char* name() const noexcept { return _name; }
 private:
 	// need a fixed size to easily call unlink with the stored name
 	static constexpr std::size_t kMaxName{64}; 

@@ -123,11 +123,13 @@ public:
 	// does the work of move, its fine to call as we are attaching
 	// a name to the rvalue inside the move before calling this
 	void moveFrom(SharedSegment& other) noexcept; 
+
+	[[nodiscard]] bool valid() const noexcept { return _base != nullptr; }
 private:
 	// need a fixed size to easily call unlink with the stored name
 	static constexpr std::size_t kMaxName{64}; 
 
-	void* 		_base{nullptr};
+	void* 	    	_base{nullptr};
 	std::size_t 	_bytes{0};
 	char		_name[kMaxName]{};
 	bool		_creator{false};

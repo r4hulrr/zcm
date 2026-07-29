@@ -168,8 +168,13 @@ public:
 
 	SharedRegion(const SharedRegion&) = delete;
 	SharedRegion& operator=(const SharedRegion&) = delete;
-
+	
+	// creator path -> create the shm
 	[[nodiscard]] SegmentError create(const char* name,
+					 const SegmentOptions& opts = {}) noexcept;
+
+	// attacher path
+	[[nodiscard]] SegmentError attach(const char* name,
 					 const SegmentOptions& opts = {}) noexcept;
 	// unlinks the name from the memory only if requested
 	void close(bool unlinkName) except;

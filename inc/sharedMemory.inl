@@ -387,6 +387,64 @@ SegmentError SharedRegion<LayoutType>::create(const char* name,
 }
 
 template<typename LayoutType>
+SegmentError SharedRegion<LayoutType>::attach(const char* name,
+                                                const SegmentOptions& opts = {}) noexcept
+{
+        const SegmentError e = _segment.open(name, sizeof(Image), opts);
+        if (e != SegmentError::Ok) return e;
+
+        auto* raw = static_cast<unsigned char*>(_segment.base());
+        auto* hdr = static_cast<SegmentHeader*>(_segment.base());
+
+        std::atomic_ref<std::uint32_t> state{hdr->state};
+
+        // attach ONLY WHEN STATE IS READY
+        // we wait until deadline which is the max time process is willing to wait to connect
+        const std::uint64_t deadline = detail::monotonicMillis() + opts.attachTimeoutMs;
+
+        while(true)
+        {
+                // acquire the state
+                const auto s = static_cast<SegmentHeader::State>(state.load(std::memory_order_acquire));
+                
+                if (s == SegmentHeader::State::Ready) break;
+                if (s == SegmentHeader::State::Dead)
+                {
+                        _segment.detach();
+                        return SegmentError::NotFound;
+                }
+
+                if (detail::monotonicMillis() >= deadline)
+                {
+                        _segment.detach();
+                        return SegmentError::ReadyTimeout;
+                }
+                // sleep before checking again
+                detail::sleepMicros(opts.attachPollUs);
+        }
+
+        // make sure it matches what you want
+        if (hdr->magic != SegmentHeader::kMagic)
+        { _segment.detach(); return SegmentError::MagicMismatch; }
+
+        if (hdr->version != SegmentHeader::kVersion)
+        { _segment.detach(); return SegmentError::VersionMismatch; }
+
+        if (hdr->headerBytes != Image::kHeaderReserve ||
+                hdr->totalBytes  != static_cast<std::uint64_t>(sizeof(Image)))
+        { _segment.detach(); return SegmentError::SizeMismatch; }
+        
+        if (hdr->layoutSignature != signature())
+        { _segment.detach(); return SegmentError::LayoutMismatch; }
+
+        // increase the attacher count
+        std::atomic_ref<std::uint32_t>{hdr->attachedCount}.fetch_add(1, std::memory_order_relaxed);
+
+        _payload = reinterpret_cast<LayoutType*>(raw + Image::kHeaderReserve);
+        return SegmentError::Ok;
+}
+
+template<typename LayoutType>
 constexpr std::uint64_t SharedRegion<LayoutType>::signature() noexcept
 {
         // needs to be improved

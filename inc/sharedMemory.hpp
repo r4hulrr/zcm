@@ -69,8 +69,8 @@ struct SegmentHeader
         std::uint64_t totalBytes; // total segment size
         std::uint64_t layoutSignature; // Checks that both binaries compiled the same payload layout
         std::int64_t  creatorPid;
-        std::uint32_t state;         // accessed via atomic_ref
-        std::uint32_t attachedCount; // accessed via atomic_ref
+        std::uint32_t state;         // accessed via atomic_ref not made atomic to keep it constructor free
+        std::uint32_t attachedCount; // accessed via atomic_ref for same reason
 };
 
 static_assert(std::is_standard_layout_v<SegmentHeader>,
@@ -148,7 +148,41 @@ private:
 	bool		_creator{false};
 	bool		_locked{false}; // prevent pages to swap disk
 	int		_errno{0}; // stores latest error code
-}
+};
+
+// SharedRegion Classm, includes SharedSegment + the header protocol +
+// the construct once / adopt-many rule. This is the class the rest of the
+// middleware talks to
+template<typename LayoutType>
+class SharedRegion
+{
+	static_assert(std::is_trivially_destructible_v<LayoutType>,
+		"Nothing ever runs a destructor over the payload, the segment can "
+        	"outlive every process that mapped it, and a destructor that ran in "
+        	"one process would corrupt the others");
+public:
+	using Image = SegmentImage<LayoutType>; // v useful for size
+
+	SharedRegion() noexcept = default;
+	~SharedRegion() noexcept { close(false); }
+
+	SharedRegion(const SharedRegion&) = delete;
+	SharedRegion& operator=(const SharedRegion&) = delete;
+
+	[[nodiscard]] SegmentError create(const char* name,
+					 const SegmentOptions& opts = {}) noexcept;
+	// unlinks the name from the memory only if requested
+	void close(bool unlinkName) except;
+
+	// ideally should be a compile time footprint of the LayoutType
+	// to ensure a connecting process has the expected Layout Type
+	// currently just a version number but needs to be implemented further
+	[[nodiscard]] static constexpr std::uint64_t signature() noexcept;
+
+private:
+	SharedSegment _segment;
+	LayoutType* _payload{nullptr};
+};
 
 } // namespace zcm
 

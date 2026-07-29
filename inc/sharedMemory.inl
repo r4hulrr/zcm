@@ -347,4 +347,68 @@ inline SegmentError SharedSegment::unlink() noexcept
         return SegmentError::Ok;
 }
 
+template<typename LayoutType>
+SegmentError SharedRegion<LayoutType>::create(const char* name,
+                                                const SegmentOptions& opts = {}) noexcept
+{
+        // create shm
+        const SegmentError e = _segment.create(name, sizeof(Image), opts);
+        if (e != SegmentError::Ok) return e;
+
+        // it is State::Empty, now initialize it
+        auto* raw = static_cast<unsigned char*>(_segment.base());
+        auto* hdr = reinterpret_cast<SegmentHeader*>(raw);
+
+        // change state to intializing
+        std::atomic_ref<std::uint32_t> state{hdr->state};
+
+        // relaxed is fine as nothing synchronizes on it
+        state.store(static_cast<std::uint32_t>(SegmentHeader::State::Initializing),
+                        std::memory_order_relaxed);
+
+        // now construct it
+        LayoutType* payload = ::new (static_cast<void*>(raw + Image::kHeaderReserve))
+                                LayoutType{} ;
+        
+        hdr->magic           = SegmentHeader::kMagic;
+        hdr->version         = SegmentHeader::kVersion;
+        hdr->headerBytes     = static_cast<std::uint32_t>(Image::kHeaderReserve);
+        hdr->totalBytes      = static_cast<std::uint64_t>(sizeof(Image));
+        hdr->layoutSignature = signature();
+        hdr->creatorPid      = static_cast<std::int64_t>(::getpid());
+        std::atomic_ref<std::uint32_t>{hdr->attachedCount}.store(0, std::memory_order_relaxed);
+
+        // now actually let everyone know its ready
+        state.store(static_cast<std::uint32_t>(SegmentHeader::State::Ready), 
+                        std::memory_order_release);
+
+        _payload = payload;
+        return SegmentError::Ok;
+}
+
+template<typename LayoutType>
+constexpr std::uint64_t SharedRegion<LayoutType>::signature() noexcept
+{
+        // needs to be improved
+        // ideally check whether all data is in the layout we expect
+        // maybe an xor
+        return 1; 
+}
+
+template<typename LayoutType>
+void SharedRegion<LayoutType>::close(bool unlinkName) noexcept
+{       // NO destructors called
+        // reduce the attached count if not the creator
+        if (_segment.valid() && _payload != nullptr && !_segment.isCreator())
+        {
+                auto* hdr = reinterpret_cast<SegmentHeader*>(_segment.base());
+                std::atomic_ref<std::uint32_t>{hdr->attachedCount}.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        // unlink name from shm if requested
+        if (unlinkName && _segment.valid()) (void)_segment.unlink();
+        _segment.detach();
+        _payload = nullptr;
+}
+
 } // namespace zcm

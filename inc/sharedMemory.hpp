@@ -177,7 +177,12 @@ public:
 	[[nodiscard]] SegmentError attach(const char* name,
 					 const SegmentOptions& opts = {}) noexcept;
 	// unlinks the name from the memory only if requested
-	void close(bool unlinkName) except;
+	void close(bool unlinkName) noexcept;
+
+	[[nodiscard]] LayoutType* layout() const noexcept { return _payload; }
+	[[nodiscard]] LayoutType* operator->() const noexcept { return _payload; }
+	[[nodiscard]] bool valid() const noexcept { return _payload != nullptr; }
+	[[nodiscard]] const SharedSegment& segment() const noexcept { return _segment; }
 
 	// ideally should be a compile time footprint of the LayoutType
 	// to ensure a connecting process has the expected Layout Type

@@ -28,5 +28,5 @@ struct SegmentOptions
         // is no reason to burn a core on it.
         std::uint32_t attachPollUs{200};
 
-}
+};
 } // namespace zcm

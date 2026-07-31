@@ -2,6 +2,17 @@
 
 #include "sharedMemory.hpp"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+ 
+#include <new>
+
 namespace zcm
 {
 
@@ -225,7 +236,7 @@ inline SegmentError SharedSegment::create(const char* name,
         return SegmentError::Ok; 
 }
 
-[[nodiscard]] SegmentError SharedSegment::open(const char* name,
+[[nodiscard]] inline SegmentError SharedSegment::open(const char* name,
                                 std::size_t expectedBytes,
                                 const SegmentOptions& opts) noexcept{
 
@@ -293,8 +304,7 @@ inline SegmentError SharedSegment::create(const char* name,
 
         if (base == MAP_FAILED) // this base is not the same as creators most probably its virtual
         {
-                _errno = errno;
-                ::shm_unlink(name);
+                _errno = errno; 
                 return SegmentError::MapFailed;
         }
 
@@ -303,12 +313,12 @@ inline SegmentError SharedSegment::create(const char* name,
         if (opts.hugePages)
         {
                 // hint, not for sure, we have to test it ourselves
-                (void)::madvise(base, mapBytes, MADV_HUGEPAGE);
+                (void)::madvise(base, wantBytes, MADV_HUGEPAGE);
         }
 #endif
 
         // explicitly touch each page if requested without relying on OS
-        if (opts.prefault) detail::prefaultPages(base, mapBytes);
+        if (opts.prefault) detail::prefaultPages(base, wantBytes);
 
         // lock pages if requested so it isnt swapped to disk
         // enforced not a hint so returns an error code if fails
@@ -349,7 +359,7 @@ inline SegmentError SharedSegment::unlink() noexcept
 
 template<typename LayoutType>
 SegmentError SharedRegion<LayoutType>::create(const char* name,
-                                                const SegmentOptions& opts = {}) noexcept
+                                                const SegmentOptions& opts) noexcept
 {
         // create shm
         const SegmentError e = _segment.create(name, sizeof(Image), opts);
@@ -388,7 +398,7 @@ SegmentError SharedRegion<LayoutType>::create(const char* name,
 
 template<typename LayoutType>
 SegmentError SharedRegion<LayoutType>::attach(const char* name,
-                                                const SegmentOptions& opts = {}) noexcept
+                                                const SegmentOptions& opts) noexcept
 {
         const SegmentError e = _segment.open(name, sizeof(Image), opts);
         if (e != SegmentError::Ok) return e;
